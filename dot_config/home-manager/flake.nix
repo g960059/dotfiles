@@ -23,11 +23,30 @@
         inherit system overlays;
         config.allowUnfree = true;
       };
+
+      mkHome = { username, homeDirectory }:
+        home-manager.lib.homeManagerConfiguration {
+          inherit pkgs;
+          modules = [
+            ./home.nix
+            ({ ... }: {
+              home.username = username;
+              home.homeDirectory = homeDirectory;
+            })
+          ];
+        };
     in
     {
-      homeConfigurations."hirakawa" = home-manager.lib.homeManagerConfiguration {
-        inherit pkgs;
-        modules = [ ./home.nix ];
+      homeConfigurations = {
+        hirakawa = mkHome {
+          username = "hirakawa";
+          homeDirectory = "/Users/hirakawa";
+        };
+
+        virtualmachine = mkHome {
+          username = "virtualmachine";
+          homeDirectory = "/Users/virtualmachine";
+        };
       };
     };
 }
