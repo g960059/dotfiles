@@ -24,7 +24,7 @@ format = "[$output]($style) "
 [directory]
 truncation_length = 6
 home_symbol = "~"
-truncate_to_repo = false
+truncate_to_repo = true 
 read_only = " 󰌾"
 style = "bold fg:#89b4fa"
 read_only_style = "fg:#f38ba8"
