@@ -11,6 +11,7 @@
     eza
     fzf
     keifu
+    sheldon
   ];
 
   programs.starship = {
