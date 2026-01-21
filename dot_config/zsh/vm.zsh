@@ -22,4 +22,5 @@ export PATH="/Users/virtualmachine/.local/bin:$PATH"
 export CLOUDSDK_PYTHON="/Users/virtualmachine/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/bin/python3.11"
 
 export ENV_KIND="VM"
+export HM_TARGET=virtualmachine
 
