@@ -1,80 +1,97 @@
-add_newline = true
+"$schema" = 'https://starship.rs/config-schema.json'
 
-# ----------------------------------------------------
-# format
-# ----------------------------------------------------
 format = """
-$hostname\
+${custom.vm_ctx}\
+${custom.vm_to_dir}\
+${custom.dir_left_cap}\
 $directory\
+${custom.dir_to_git}\
+${custom.dir_to_default}\
 $git_branch\
 $git_status\
-$fill\
-$cmd_duration\
-\n$character\
+${custom.git_close}\
+\n$character
 """
 
-[hostname]
-ssh_only = true
-format = """
-[](fg:#f38ba8)\
-[VM]($style)\
-[](fg:#f38ba8)\
-"""
+# -------------------------
+# VM ctx (SSH時のみ表示)
+# -------------------------
+[custom.vm_ctx]
+when = '[ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]'
+command = "printf 'VM'"
 style = "bold fg:#313244 bg:#f38ba8"
+format = "[](fg:#f38ba8)[ $output ]($style)"
 
-# ----------------------------------------------------
-# left module (your design preserved)
-# ----------------------------------------------------
-[fill]
-symbol = '─'
+[custom.vm_to_dir]
+when = '[ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]'
+command = "printf ''"
+format = "[](fg:#f38ba8 bg:#80EBDF)"
+
+# -------------------------
+# Directory 左キャップ（非SSH時のみ）
+# -------------------------
+[custom.dir_left_cap]
+when = '! ([ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ])'
+command = "printf ''"
+format = "[](fg:#80EBDF)"
 
 [directory]
 truncation_length = 6
-truncation_symbol = ' '
 truncate_to_repo = false
-home_symbol = '~'
-read_only = ' 󰌾 '
-format = """
-[](fg:#80EBDF)\
-[$path]($style)\
-[$read_only]($read_only_style)\
-[](fg:#80EBDF)\
-"""
-style = 'bold fg:#313244 bg:#80EBDF'
-read_only_style = 'bold fg:#313244 bg:#80EBDF'
+home_symbol = "~"
+# read_only は「必要な時だけ $read_only に入る」。先頭にスペースを含めておくと見た目が綺麗。
+read_only = " 󰌾"
+style = "bold fg:#313244 bg:#80EBDF"
+# ★ bash展開は使わない。$read_only は read-only でないときは空文字になる。
+format = "[  $path$read_only ]($style)"
 
+# -------------------------
+# Directory -> Git (repo 内のみ) / Directory -> default (repo 外のみ)
+# -------------------------
+[custom.dir_to_git]
+when = 'git rev-parse --is-inside-work-tree >/dev/null 2>&1'
+command = "printf ''"
+format = "[](fg:#80EBDF bg:#1d2230)"
+
+[custom.dir_to_default]
+when = '! git rev-parse --is-inside-work-tree >/dev/null 2>&1'
+command = "printf ''"
+format = "[](fg:#80EBDF)"
+
+# -------------------------
+# Git (bg:#1d2230) ※先頭に余計なキャップは付けない
+# -------------------------
 [git_branch]
 symbol = ""
 style = "fg:#769ff0 bg:#1d2230"
-format = """
-[](fg:#1d2230)\
-[$symbol $branch]($style)\
-"""
+format = "[ $symbol $branch ]($style)"
 
 [git_status]
 style = "fg:#769ff0 bg:#1d2230"
-format = """
-[$all_status$ahead_behind]($style)\
-[](fg:#1d2230)\
-"""
+format = "[ $all_status$ahead_behind ]($style)"
 
-# ----------------------------------------------------
-# right module
-# ----------------------------------------------------
-[cmd_duration]
-min_time = 1
-style = 'fg:#e0af68'
-format = "[ $duration]($style)"
+[custom.git_close]
+when = 'git rev-parse --is-inside-work-tree >/dev/null 2>&1'
+command = "printf ''"
+format = "[](fg:#1d2230)"
 
-# ----------------------------------------------------
-# prompt module
-# ----------------------------------------------------
+# -------------------------
+# fill / prompt
+# -------------------------
+[fill]
+symbol = "─"
+style = "fg:#585b70"
+
 [character]
-vimcmd_symbol = '[V](bold green) '
+vimcmd_symbol = "[V](bold green) "
 
-# ----------------------------------------------------
-# Disable modules you don't want (and likely source of ".env")
-# ----------------------------------------------------
+# -------------------------
+# cmd_duration 非表示
+# -------------------------
+[cmd_duration]
+disabled = true
+
+# (不要モジュール)
 [python]
 disabled = true
 [direnv]
