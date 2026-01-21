@@ -1,9 +1,21 @@
+# 普段用: y
 function y() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-	command yazi "$@" --cwd-file="$tmp"
-	IFS= read -r -d '' cwd < "$tmp"
-	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
-	rm -f -- "$tmp"
+  local tmp="$(mktemp -t yazi-cwd.XXXXXX)"
+  yazi --cwd-file="$tmp" "$@"
+  local cwd
+  cwd="$(cat -- "$tmp" 2>/dev/null)"
+  rm -f -- "$tmp"
+  [[ -n "$cwd" && -d "$cwd" && "$cwd" != "$PWD" ]] && cd -- "$cwd"
+}
+
+# 狭い用: yn（親/プレビュー無しレイアウトの設定を読む）
+function yn() {
+  local tmp="$(mktemp -t yazi-cwd.XXXXXX)"
+  YAZI_CONFIG_HOME="$HOME/.config/yazi-narrow" yazi --cwd-file="$tmp" "$@"
+  local cwd
+  cwd="$(cat -- "$tmp" 2>/dev/null)"
+  rm -f -- "$tmp"
+  [[ -n "$cwd" && -d "$cwd" && "$cwd" != "$PWD" ]] && cd -- "$cwd"
 }
 
 
