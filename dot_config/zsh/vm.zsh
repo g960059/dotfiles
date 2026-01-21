@@ -21,3 +21,5 @@ source /Users/virtualmachine/google-cloud-sdk/completion.zsh.inc
 export PATH="/Users/virtualmachine/.local/bin:$PATH"
 export CLOUDSDK_PYTHON="/Users/virtualmachine/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/bin/python3.11"
 
+export ENV_KIND="VM"
+
