@@ -1,11 +1,12 @@
-# Managed by chezmoi
-
-# Common
-source ~/.config/zsh/common.zsh
+# .zshrc
 
 # Host/VM specific
-if [[ "$(hostname -s)" == "virtualmachine" ]]; then
+if [[ "$USER" == "virtualmachine" ]]; then
   source ~/.config/zsh/vm.zsh
 else
   source ~/.config/zsh/host.zsh
 fi
+
+# Common
+source ~/.config/zsh/common.zsh
+
