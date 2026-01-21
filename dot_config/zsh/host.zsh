@@ -32,6 +32,5 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # Added by Antigravity
 export PATH="/Users/hirakawa/.antigravity/antigravity/bin:$PATH"
 
-export ENV_KIND="HOST"
 export HM_TARGET=hirakawa
 

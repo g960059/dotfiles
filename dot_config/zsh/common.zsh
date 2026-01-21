@@ -15,8 +15,8 @@ alias vim='nvim'
 alias cc="claude --dangerously-skip-permissions"
 
 eval "$(fzf --zsh)"
-eval "$(zoxide init zsh)"
-eval "$(starship init zsh)"
+eval "$(sheldon source)"
+command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 
 # ----- home-manager helper (no install required) -----
 _hm_flake="${HOME}/.config/home-manager"
