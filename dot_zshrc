@@ -1,56 +1,11 @@
+# Managed by chezmoi
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-eval "$(sheldon source)"
-# Pure の user@host を UTM_VM に
-if (( ${+prompt_pure_state} )) && [[ -n ${prompt_pure_state[username]-} ]]; then
-  prompt_pure_state[username]='%F{${prompt_pure_colors[user]}}UTM_VM%f'
+# Common
+source ~/.config/zsh/common.zsh
+
+# Host/VM specific
+if [[ "$(hostname -s)" == "virtualmachine" ]]; then
+  source ~/.config/zsh/vm.zsh
+else
+  source ~/.config/zsh/host.zsh
 fi
-
-# Added by Antigravity
-export PATH="/Users/virtualmachine/.antigravity/antigravity/bin:$PATH"
-
-# Added by Antigravity
-export PATH="/Users/virtualmachine/.antigravity/antigravity/bin:$PATH"
-alias vim='nvim'
-
-function y() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-	command yazi "$@" --cwd-file="$tmp"
-	IFS= read -r -d '' cwd < "$tmp"
-	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
-	rm -f -- "$tmp"
-}
-
-
-function ghq-path() {
-    ghq list --full-path | fzf
-}
-
-function repo() {
-    local moveto
-    moveto=$(ghq-path)
-    cd "${moveto}" || exit 1
-
-    # rename session if in tmux
-    if [[ -n ${TMUX} ]]; then
-        local repo_name
-        repo_name="${moveto##*/}"
-
-        tmux rename-session "${repo_name//./-}"
-    fi
-}
-export PATH="$PATH:$(go env GOPATH)/bin"
-
-alias cc="claude --dangerously-skip-permissions"
-
-# Google Cloud SDK
-source /Users/virtualmachine/google-cloud-sdk/path.zsh.inc
-source /Users/virtualmachine/google-cloud-sdk/completion.zsh.inc
-
-# uv (Python) for gcloud
-export PATH="/Users/virtualmachine/.local/bin:$PATH"
-export CLOUDSDK_PYTHON="/Users/virtualmachine/.local/share/uv/python/cpython-3.11.14-macos-aarch64-none/bin/python3.11"
-eval "$(fzf --zsh)"
-
