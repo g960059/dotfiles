@@ -12,8 +12,8 @@ $character
 # -------------------------
 [custom.vm_ctx]
 when = '[ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]'
-command = "printf '[VM] '"
-style = "bold fg:#f38ba8"
+command = "printf 'VM'"
+style = "fg:#6c7086"
 format = "[$output]($style) "
 
 # -------------------------
