@@ -12,5 +12,8 @@
     fzf
     keifu
   ];
-}
 
+  programs.starship = {
+    enable = true;
+  };
+}
