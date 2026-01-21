@@ -1,89 +1,62 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
+add_newline = false
+
 format = """
-${custom.vm_ctx}\
-${custom.vm_to_dir}\
-${custom.dir_left_cap}\
-$directory\
-${custom.dir_to_git}\
-${custom.dir_to_default}\
-$git_branch\
-$git_status\
-${custom.git_close}\
-\n$character
+${custom.vm_ctx}$directory$git_branch$git_status
+$character
 """
 
 # -------------------------
-# VM ctx (SSH時のみ表示)
+# VM ctx (SSH時のみ表示 / それ以外は空)
 # -------------------------
 [custom.vm_ctx]
 when = '[ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]'
-command = "printf 'VM'"
-style = "bold fg:#313244 bg:#f38ba8"
-format = "[](fg:#f38ba8)[ $output ]($style)"
-
-[custom.vm_to_dir]
-when = '[ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]'
-command = "printf ''"
-format = "[](fg:#f38ba8 bg:#80EBDF)"
+command = "printf '[VM] '"
+style = "bold fg:#f38ba8"
+format = "[$output]($style) "
 
 # -------------------------
-# Directory 左キャップ（非SSH時のみ）
+# Directory (Pure寄り)
+#   - repo配下では repo からの相対パスにする（末尾表示）
+#   - repo外では通常のパス
 # -------------------------
-[custom.dir_left_cap]
-when = '! ([ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ])'
-command = "printf ''"
-format = "[](fg:#80EBDF)"
-
 [directory]
 truncation_length = 6
-truncate_to_repo = false
 home_symbol = "~"
-# read_only は「必要な時だけ $read_only に入る」。先頭にスペースを含めておくと見た目が綺麗。
+truncate_to_repo = false
 read_only = " 󰌾"
-style = "bold fg:#313244 bg:#80EBDF"
-# ★ bash展開は使わない。$read_only は read-only でないときは空文字になる。
-format = "[  $path$read_only ]($style)"
+style = "bold fg:#89b4fa"
+read_only_style = "fg:#f38ba8"
+format = "[$path]($style)[$read_only]($read_only_style) "
 
 # -------------------------
-# Directory -> Git (repo 内のみ) / Directory -> default (repo 外のみ)
-# -------------------------
-[custom.dir_to_git]
-when = 'git rev-parse --is-inside-work-tree >/dev/null 2>&1'
-command = "printf ''"
-format = "[](fg:#80EBDF bg:#1d2230)"
-
-[custom.dir_to_default]
-when = '! git rev-parse --is-inside-work-tree >/dev/null 2>&1'
-command = "printf ''"
-format = "[](fg:#80EBDF)"
-
-# -------------------------
-# Git (bg:#1d2230) ※先頭に余計なキャップは付けない
+# Git (薄いグレー / Pure寄り)
 # -------------------------
 [git_branch]
 symbol = ""
-style = "fg:#769ff0 bg:#1d2230"
-format = "[ $symbol $branch ]($style)"
+style = "fg:#6c7086"
+format = "[$symbol $branch]($style) "
 
+# dirty のときだけ表示に寄せる：
+#   - modified/staged/renamed/deleted/untracked/stashed がある場合だけ出る
+#   - ahead/behind も「変更があるときだけ」でよければこのまま
 [git_status]
-style = "fg:#769ff0 bg:#1d2230"
-format = "[ $all_status$ahead_behind ]($style)"
+style = "fg:#6c7086"
+format = "[$all_status$ahead_behind]($style) "
+stashed = "*"  # 好みで（Pure寄りに控えめな記号）
 
-[custom.git_close]
-when = 'git rev-parse --is-inside-work-tree >/dev/null 2>&1'
-command = "printf ''"
-format = "[](fg:#1d2230)"
+# 変更がないときは完全に空にする（dirtyのみ）
+# ※ Starship は clean時に $all_status が空になるので、結果として何も出ません
+#   さらに厳密にしたい場合は下の custom.git_dirty_gate を使います（後述）
 
 # -------------------------
-# fill / prompt
+# Prompt
 # -------------------------
-[fill]
-symbol = "─"
-style = "fg:#585b70"
-
 [character]
-vimcmd_symbol = "[V](bold green) "
+success_symbol = "[❯](bold fg:#a6e3a1)"
+error_symbol = "[❯](bold fg:#f38ba8)"
+vimcmd_symbol = "[V](bold fg:#a6e3a1)"
 
 # -------------------------
 # cmd_duration 非表示
