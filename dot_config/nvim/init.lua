@@ -2,6 +2,20 @@ require("config.lazy")
 
 vim.opt.autoread = true
 vim.opt.updatetime = 200 -- CursorHold を早める（お好みで 200〜1000）
+vim.opt.number = true
+vim.opt.cursorline = true
+vim.opt.expandtab = true
+vim.opt.shiftround = true
+vim.opt.shiftwidth = 2
+vim.opt.softtabstop = 2
+vim.opt.tabstop = 2
+
+vim.opt.scrolloff = 3
+
+vim.opt.whichwrap = 'b,s,h,l,<,>,[,],~'
+
+-- share clipboard with OS
+vim.opt.clipboard:append('unnamedplus,unnamed')
 
 local aug = vim.api.nvim_create_augroup("AutoReadCheckTime", { clear = true })
 
