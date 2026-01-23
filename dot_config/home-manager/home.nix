@@ -14,6 +14,13 @@
     keifu
     sheldon
     tree-sitter
+    # LSP servers (managed by Nix for reproducibility)
+    lua-language-server
+    nil
+    nodePackages.typescript
+    nodePackages.typescript-language-server
+    pyright
+    nodePackages.bash-language-server
   ];
 
   programs.starship = {
