@@ -13,6 +13,7 @@
     zoxide
     keifu
     sheldon
+    tree-sitter
   ];
 
   programs.starship = {

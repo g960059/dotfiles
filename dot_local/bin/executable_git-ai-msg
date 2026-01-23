@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 万一 zsh などで実行されても bash に切り替える
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
+
+# -----------------------------
+# Config (env override)
+# -----------------------------
+MODEL="${OPENROUTER_MODEL:-google/gemini-3-flash-preview}"
+LANG="${AI_COMMIT_LANG:-ja}"
+STYLE="${AI_COMMIT_STYLE:-conventional}"   # conventional | plain
+MAX_CHARS="${AI_COMMIT_MAX_CHARS:-72}"
+MAX_BYTES="${AI_COMMIT_MAX_BYTES:-120000}"
+
+# secrets: file-based (your setup)
+KEY_FILE="${OPENROUTER_API_KEY_FILE:-}"
+if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+  API_KEY="$OPENROUTER_API_KEY"
+elif [[ -n "$KEY_FILE" && -f "$KEY_FILE" ]]; then
+  API_KEY="$(tr -d '\r\n' < "$KEY_FILE")"
+else
+  echo "ERROR: set OPENROUTER_API_KEY or OPENROUTER_API_KEY_FILE" >&2
+  exit 1
+fi
+if [[ -z "$API_KEY" ]]; then
+  echo "ERROR: OpenRouter API key is empty" >&2
+  exit 1
+fi
+
+# optional headers (OpenRouter-recommended)
+APP_REFERER="${OPENROUTER_HTTP_REFERER:-}"
+APP_TITLE="${OPENROUTER_X_TITLE:-git-ai-commit}"
+
+# -----------------------------
+# Build input from staged changes only
+# -----------------------------
+if git diff --cached --quiet; then
+  echo "ERROR: no staged changes (git add first)" >&2
+  exit 2
+fi
+
+STATUS="$(git status --porcelain=v1 || true)"
+
+# Optional excludes: space-separated globs (example: ".env* secrets/* **/*.pem")
+EXCLUDES=()
+if [[ -n "${AI_COMMIT_EXCLUDE:-}" ]]; then
+  # shellcheck disable=SC2206
+  PATTERNS=(${AI_COMMIT_EXCLUDE})
+  for p in "${PATTERNS[@]}"; do
+    EXCLUDES+=(":(exclude)${p}")
+  done
+fi
+
+# build git diff command safely (works even if EXCLUDES is empty)
+DIFF_CMD=(git diff --cached --no-color --minimal -- .)
+if ((${#EXCLUDES[@]})); then
+  DIFF_CMD+=("${EXCLUDES[@]}")
+fi
+DIFF="$("${DIFF_CMD[@]}" || true)"
+
+INPUT="$(printf "## git status\n%s\n\n## git diff --cached\n%s\n" "$STATUS" "$DIFF" | head -c "$MAX_BYTES")"
+
+# -----------------------------
+# Prompting
+# -----------------------------
+if [[ "$STYLE" == "conventional" ]]; then
+  FORMAT_HINT=$'Use Conventional Commits.\nAllowed types: feat, fix, docs, refactor, perf, test, build, ci, chore, revert.\nOne line only.'
+else
+  FORMAT_HINT="One line only."
+fi
+
+SYSTEM_PROMPT=$(
+cat <<EOF
+You write excellent git commit subjects.
+
+Rules:
+- Output ONLY the commit subject line.
+- No quotes, no code fences, no trailing period.
+- Prefer <= ${MAX_CHARS} characters (soft limit).
+- Language: ${LANG}.
+- ${FORMAT_HINT}
+EOF
+)
+
+# -----------------------------
+# Call OpenRouter chat completions
+# -----------------------------
+python3 - <<'PY' \
+  "$API_KEY" "$MODEL" "$SYSTEM_PROMPT" "$INPUT" "$APP_REFERER" "$APP_TITLE"
+import json, sys, urllib.request
+
+api_key, model, system_prompt, user_input, http_referer, x_title = sys.argv[1:]
+url = "https://openrouter.ai/api/v1/chat/completions"
+
+payload = {
+    "model": model,
+    "messages": [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_input},
+    ],
+    "temperature": 0.2,
+    "max_tokens": 120,
+}
+
+headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+}
+if http_referer:
+    headers["HTTP-Referer"] = http_referer
+if x_title:
+    headers["X-Title"] = x_title
+
+req = urllib.request.Request(
+    url,
+    data=json.dumps(payload).encode("utf-8"),
+    headers=headers,
+    method="POST",
+)
+
+with urllib.request.urlopen(req, timeout=30) as r:
+    data = json.load(r)
+
+msg = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+msg = (msg or "").strip().splitlines()[0].strip().strip('"\'')
+
+if not msg:
+    raise SystemExit("Empty message returned from model")
+
+print(msg)
+PY
+

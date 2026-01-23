@@ -1,0 +1,39 @@
+cat > "$HOME/.config/git/hooks/prepare-commit-msg" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+export OPENROUTER_API_KEY_FILE="${OPENROUTER_API_KEY_FILE:-$HOME/.config/secrets/openrouter_api_key}"
+export OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-3-flash-preview}"
+
+MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+
+# merge/squash/rebase 等は触らない
+case "$COMMIT_SOURCE" in
+  merge|squash|commit|rebase) exit 0 ;;
+esac
+
+# staged がないなら何もしない
+if git diff --cached --quiet; then
+  exit 0
+fi
+
+# git-ai-msg がなければ何もしない
+command -v git-ai-msg >/dev/null 2>&1 || exit 0
+
+# すでにメッセージがある場合でも、"実質空（コメント/空白のみ）" なら生成して埋める
+# それ以外（ユーザが書いた本文がある）なら尊重して何もしない
+if [[ -s "$MSG_FILE" ]]; then
+  if grep -q '^[[:space:]]*[^#[:space:]]' "$MSG_FILE"; then
+    # コメントではない実内容がある
+    exit 0
+  fi
+fi
+
+MSG="$(git-ai-msg 2>/dev/null || true)"
+[[ -n "$MSG" ]] && printf "%s\n" "$MSG" > "$MSG_FILE"
+EOF
+
+chmod +x "$HOME/.config/git/hooks/prepare-commit-msg"
+
