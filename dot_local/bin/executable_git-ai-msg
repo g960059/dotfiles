@@ -81,7 +81,30 @@ fi
 
 STATUS="$(git status --porcelain=v1 || true)"
 
+# --- Security / Excludes ---
+SECURITY_MODE="${AI_COMMIT_SECURITY:-block}"   # block | warn | off
+REDACT_MODE="${AI_COMMIT_REDACT:-1}"           # 1: redact (warn時推奨), 0: no redact
+EXCLUDE_CLEAR="${AI_COMMIT_EXCLUDE_CLEAR:-0}"  # 1: disable defaults
+
+DEFAULT_EXCLUDE_PATTERNS=(
+  ".env" ".env.*" ".envrc"
+  "secrets/*" "**/secrets/*"
+  ".ssh/*" "**/.ssh/*"
+  "*.pem" "*.key" "*.p12" "*.pfx" "*.asc" "*.gpg"
+  "id_rsa" "id_ed25519" "id_ecdsa" "id_dsa"
+  "*.kdbx"
+)
+
 EXCLUDES=()
+
+# デフォルト除外（必要なら AI_COMMIT_EXCLUDE_CLEAR=1 で無効化）
+if [[ "$EXCLUDE_CLEAR" != "1" ]]; then
+  for p in "${DEFAULT_EXCLUDE_PATTERNS[@]}"; do
+    EXCLUDES+=(":(exclude)${p}")
+  done
+fi
+
+# 追加除外（ユーザー指定）
 if [[ -n "${AI_COMMIT_EXCLUDE:-}" ]]; then
   # shellcheck disable=SC2206
   PATTERNS=(${AI_COMMIT_EXCLUDE})
@@ -90,11 +113,118 @@ if [[ -n "${AI_COMMIT_EXCLUDE:-}" ]]; then
   done
 fi
 
+
 DIFF_CMD=(git diff --cached --no-color --minimal -- .)
 if ((${#EXCLUDES[@]})); then
   DIFF_CMD+=("${EXCLUDES[@]}")
 fi
-DIFF="$("${DIFF_CMD[@]}" || true)"
+DIFF_RAW="$("${DIFF_CMD[@]}" || true)"
+
+# 機密検知 & マスク（OpenRouter 送信前）
+if [[ "$SECURITY_MODE" != "off" ]]; then
+  DIFF="$(
+    python3 /dev/fd/3 "$SECURITY_MODE" "$REDACT_MODE" <<<"$DIFF_RAW" 3<<'PY'
+import re, sys
+
+mode = sys.argv[1]          # block|warn
+redact = sys.argv[2] == "1"
+text = sys.stdin.read()
+
+# --- Patterns (high-signal) ---
+BLOCK_PATTERNS = [
+    (
+        "private_key_block",
+        re.compile(
+            r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\s*\n"
+            r"(?:[A-Za-z0-9+/=]{10,}\s*\n)+"
+            r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
+            re.M,
+        ),
+    ),
+    (
+        "pgp_private_key",
+        re.compile(
+            r"-----BEGIN PGP PRIVATE KEY BLOCK-----\s*\n"
+            r"(?:[A-Za-z0-9+/=]{10,}\s*\n)+"
+            r"-----END PGP PRIVATE KEY BLOCK-----",
+            re.M,
+        ),
+    ),
+]
+
+LINE_PATTERNS = [
+    ("aws_access_key_id", re.compile(r"\b(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b")),
+    ("github_token",      re.compile(r"\b(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
+    ("slack_token",       re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b")),
+    ("google_api_key",    re.compile(r"\b(AIzaSy[A-Za-z0-9_-]{20,})\b")),
+    ("secret_assignment", re.compile(r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*([^\s\"']{8,})")),
+]
+
+def mask(s: str) -> str:
+    if len(s) <= 8:
+        return "***"
+    return s[:4] + "***" + s[-4:]
+
+issues = []
+
+# Detect block patterns
+for name, pat in BLOCK_PATTERNS:
+    if pat.search(text):
+        issues.append((name, "<block>"))
+
+# Track current file from diff headers for nicer reporting
+cur_file = None
+lines = text.splitlines()
+
+for i, ln in enumerate(lines, 1):
+    if ln.startswith("+++ b/"):
+        cur_file = ln[6:].strip()
+    for name, pat in LINE_PATTERNS:
+        m = pat.search(ln)
+        if not m:
+            continue
+        snippet = ln.strip()
+        if len(snippet) > 160:
+            snippet = snippet[:160] + "…"
+        issues.append((name, f"{cur_file or '<unknown>'}:{i}: {snippet}"))
+
+# If issues found, either block or warn
+if issues:
+    msg = ["[git-ai-msg] Potential secrets detected. Not sending diff to OpenRouter."]
+    msg.append(f"[git-ai-msg] mode={mode} redact={redact}")
+    for name, info in issues[:20]:
+        msg.append(f"[git-ai-msg] - {name}: {info}")
+    if len(issues) > 20:
+        msg.append(f"[git-ai-msg] ... and {len(issues)-20} more")
+    sys.stderr.write("\n".join(msg) + "\n")
+
+    if mode == "block":
+        sys.exit(42)
+
+# Redaction (warn mode typically)
+if redact:
+    for name, pat in BLOCK_PATTERNS:
+        text = pat.sub("[REDACTED_SECRET_BLOCK]", text)
+
+    text = re.sub(r"\b(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b", lambda m: mask(m.group(0)), text)
+    text = re.sub(r"\b(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b", lambda m: mask(m.group(0)), text)
+    text = re.sub(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b", lambda m: mask(m.group(0)), text)
+    text = re.sub(r"\b(AIzaSy[A-Za-z0-9_-]{20,})\b", lambda m: mask(m.group(0)), text)
+
+    def repl(m):
+        key = m.group(1)
+        val = m.group(2)
+        return f"{key}={mask(val)}"
+    text = re.sub(r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[:=]\s*([^\s\"']{8,})", repl, text)
+
+sys.stdout.write(text)
+PY
+  )"
+else
+  DIFF="$DIFF_RAW"
+fi
+
+
 
 INPUT="$(printf "## git status\n%s\n\n## git diff --cached\n%s\n" "$STATUS" "$DIFF" | head -c "$MAX_BYTES")"
 

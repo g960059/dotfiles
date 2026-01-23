@@ -38,9 +38,8 @@ if git diff --cached --quiet; then
   exit 2
 fi
 
-CANDS="$(git-ai-msg --n "$N" || true)"
-if [[ -z "$CANDS" ]]; then
-  echo "ERROR: failed to generate commit messages" >&2
+if ! CANDS="$(git-ai-msg --n "$N")"; then
+  echo "ERROR: commit message generation aborted" >&2
   exit 3
 fi
 
