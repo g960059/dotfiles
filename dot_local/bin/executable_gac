@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
+
+EDIT=0
+N="${AI_COMMIT_N:-3}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --edit|-e) EDIT=1; shift ;;
+    --n|-n) N="${2:-3}"; shift 2 ;;
+    --help|-h)
+      cat <<'USAGE'
+gac: AI-assisted git commit (3 candidates + fzf select)
+
+Usage:
+  gac            # pick 3 candidates via fzf and commit with -m
+  gac --edit     # after selection, open editor (-e) with -m message
+  gac --n 5      # generate 5 candidates
+
+Env:
+  AI_COMMIT_N (default: 3)
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if git diff --cached --quiet; then
+  echo "ERROR: no staged changes (git add first)" >&2
+  exit 2
+fi
+
+CANDS="$(git-ai-msg --n "$N" || true)"
+if [[ -z "$CANDS" ]]; then
+  echo "ERROR: failed to generate commit messages" >&2
+  exit 3
+fi
+
+choose_fzf() {
+  printf "%s\n" "$CANDS" | fzf \
+    --prompt="commit> " \
+    --height=12 --border \
+    --no-multi --cycle
+}
+
+choose_select() {
+  echo "Select a commit message:" >&2
+  nl -ba <<<"$CANDS" >&2
+  echo -n "> " >&2
+  read -r idx
+  sed -n "${idx}p" <<<"$CANDS"
+}
+
+if command -v fzf >/dev/null 2>&1; then
+  MSG="$(choose_fzf || true)"
+else
+  MSG="$(choose_select || true)"
+fi
+
+if [[ -z "$MSG" ]]; then
+  echo "aborted" >&2
+  exit 130
+fi
+
+echo "AI: $MSG" >&2
+if (( EDIT )); then
+  git commit -e -m "$MSG"
+else
+  git commit -m "$MSG"
+fi
