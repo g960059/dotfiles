@@ -21,6 +21,7 @@ function yn() {
 
 ghq-z()   { z "$(ghq root)/$(ghq list | fzf --height 50% --reverse)"; }
 ghq-get() { ghq get "$(gh repo list --json name --jq '.[].name' | fzf --height 50% --reverse)"; }
+
 alias repo='ghq-z'
 alias vim='nvim'
 alias cc="claude --dangerously-skip-permissions"
