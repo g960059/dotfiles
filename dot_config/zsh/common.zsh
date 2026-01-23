@@ -27,8 +27,10 @@ alias cc="claude --dangerously-skip-permissions"
 export EDITOR="nvim"
 export OPENROUTER_API_KEY_FILE="$HOME/.config/secrets/openrouter_api_key"
 export PATH="$HOME/.local/bin:$PATH"
+
 eval "$(fzf --zsh)"
 eval "$(sheldon source)"
+
 command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 
 # ----- home-manager helper (no install required) -----
