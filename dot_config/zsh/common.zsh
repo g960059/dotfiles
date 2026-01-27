@@ -18,99 +18,6 @@ function yn() {
   [[ -n "$cwd" && -d "$cwd" && "$cwd" != "$PWD" ]] && cd -- "$cwd"
 }
 
-# --- repo: ghq + fzf + zoxide + git-wt ---
-# prerequisites: ghq, fzf, zoxide (z), gh (optional for repo get), git-wt (optional for repo wt)
-
-# ローカル ghq repo へ移動（zoxide 前提）
-_repo_cd() {
-  local query="${1:-}"
-  local target
-
-  target="$(
-    ghq list -p 2>/dev/null | \
-      fzf --height 50% --reverse \
-          --prompt 'repo> ' \
-          --query "$query" \
-          --preview 'git -C {} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {} status -sb || ls -la {} | head -n 80'
-  )" || return 1
-
-  z "$target"
-}
-
-# GitHub repo を選んで ghq get（owner/repo 形式）
-_repo_get() {
-  local query="${1:-}"
-  local pick
-
-  command -v gh >/dev/null 2>&1 || { echo "repo get: gh が必要です" >&2; return 1; }
-  command -v ghq >/dev/null 2>&1 || { echo "repo get: ghq が必要です" >&2; return 1; }
-
-  pick="$(
-    gh repo list --limit 200 \
-      --json nameWithOwner,description,updatedAt \
-      --jq '.[] | "\(.nameWithOwner)\t\(.updatedAt)\t\(.description // "")"' | \
-    fzf --height 50% --reverse \
-        --prompt 'repo get> ' \
-        --with-nth=1,3 --delimiter $'\t' \
-        --query "$query" \
-        --preview 'echo {1}; echo; echo {3}; echo; echo "updated: {2}"'
-  )" || return 1
-
-  ghq get "${pick%%$'\t'*}"
-}
-
-# 現 repo で worktree へ移動（なければ作成）
-_repo_wt() {
-  local branch="${1:-}"
-  local root path
-
-  root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "repo wt: git repo の中で実行してください（先に `repo` で移動）" >&2
-    return 1
-  }
-
-  # git-wt が提供する `git wt` が動く前提
-  git wt --help >/dev/null 2>&1 || {
-    echo "repo wt: git-wt が必要です（`git wt` が動く状態にしてください）" >&2
-    return 1
-  }
-
-  if [[ -z "$branch" ]]; then
-    branch="$(
-      git -C "$root" branch --format='%(refname:short)' | \
-        fzf --height 50% --reverse \
-            --prompt 'wt> ' \
-            --preview "git -C '$root' log -n 20 --oneline --decorate --color=always {}"
-    )" || return 1
-  fi
-
-  # --nocd でパスだけ取得し、移動は zoxide に統一
-  path="$(git -C "$root" wt --nocd "$branch")" || return 1
-  z "$path"
-}
-
-repo() {
-  local sub="${1:-}"
-  case "$sub" in
-    get|clone)
-      shift; _repo_get "$@"
-      ;;
-    wt|worktree|w)
-      shift; _repo_wt "$@"
-      ;;
-    -h|--help|help)
-      cat <<'EOF'
-repo              : ghq のローカル repo へ移動（fzf + zoxide）
-repo <query>      : クエリ付きで repo 選択
-repo get [query]  : GitHub repo を選んで ghq get（owner/repo）
-repo wt [branch]  : 現 repo の worktree へ移動（なければ作成）
-EOF
-      ;;
-    *)
-      _repo_cd "$@"
-      ;;
-  esac
-}
 
 alias vim='nvim'
 alias cc="claude --dangerously-skip-permissions"
@@ -162,3 +69,111 @@ hms() {
     *)      "${_hm_runner[@]}" switch --flake "${_hm_flake}#${target}" "$sub" "$@" ;;
   esac
 }
+
+# --- repo: ghq + fzf + zoxide + git-wt ---
+# prerequisites: ghq, fzf, zoxide (z), gh (optional for repo get), git-wt (optional for repo wt)
+
+# 既存の alias / function を消してから定義（安全策）
+unalias repo 2>/dev/null
+unset -f repo 2>/dev/null
+
+# ローカル ghq repo へ移動（zoxide 前提）
+_repo_cd() {
+  local query="${1:-}"
+  local target
+
+  target="$(
+    ghq list -p 2>/dev/null | \
+      fzf --height 50% --reverse \
+          --prompt 'repo> ' \
+          --query "$query" \
+          --preview 'git -C {} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {} status -sb || ls -la {} | head -n 80'
+  )" || return 1
+
+  z "$target"
+}
+
+# GitHub repo を選んで ghq get（owner/repo 形式）
+_repo_get () {
+  local query="${1:-}"
+  local pick name subpath repo_path ghbin ghqbin
+
+  ghbin="$(whence -p gh 2>/dev/null)"  || true
+  ghqbin="$(whence -p ghq 2>/dev/null)" || true
+
+  [[ -n "$ghbin"  ]] || { echo "repo get: gh が見つかりません（PATH=$PATH）" >&2; return 1; }
+  [[ -n "$ghqbin" ]] || { echo "repo get: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+
+  pick="$(
+    "$ghbin" repo list --limit 200 \
+      --json nameWithOwner,description,updatedAt \
+      --jq '.[] | "\(.nameWithOwner)\t\(.updatedAt)\t\(.description // "")"' | \
+    fzf --height 50% --reverse \
+        --prompt 'repo get> ' \
+        --with-nth=1,3 --delimiter $'\t' \
+        --query "$query" \
+        --preview 'echo {1}; echo; echo {3}; echo; echo "updated: {2}"'
+  )" || return 1
+
+  name="${pick%%$'\t'*}"          # owner/repo
+  "$ghqbin" get "$name" || return 1
+
+  subpath="github.com/$name"
+  repo_path="$("$ghqbin" list -p -e "$subpath" 2>/dev/null | head -n 1)"
+  [[ -n "$repo_path" ]] || repo_path="$("$ghqbin" root)/$subpath"
+
+  z "$repo_path"
+}
+
+# 現 repo で worktree へ移動（なければ作成）
+_repo_wt() {
+  local branch="${1:-}"
+  local root wt_path
+
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "repo wt: git repo の中で実行してください（先に `repo` で移動）" >&2
+    return 1
+  }
+
+  git wt --help >/dev/null 2>&1 || {
+    echo "repo wt: git-wt が必要です（`git wt` が動く状態にしてください）" >&2
+    return 1
+  }
+
+  if [[ -z "$branch" ]]; then
+    branch="$(
+      git -C "$root" branch --format='%(refname:short)' | \
+        fzf --height 50% --reverse \
+            --prompt 'wt> ' \
+            --preview "git -C '$root' log -n 20 --oneline --decorate --color=always {}"
+    )" || return 1
+  fi
+
+  wt_path="$(git -C "$root" wt --nocd "$branch")" || return 1
+  z "$wt_path"
+}
+
+
+repo() {
+  local sub="${1:-}"
+  case "$sub" in
+    get|clone)
+      shift; _repo_get "$@"
+      ;;
+    wt|worktree|w)
+      shift; _repo_wt "$@"
+      ;;
+    -h|--help|help)
+      cat <<'EOF'
+repo              : ghq のローカル repo へ移動（fzf + zoxide）
+repo <query>      : クエリ付きで repo 選択
+repo get [query]  : GitHub repo を選んで ghq get（owner/repo）
+repo wt [branch]  : 現 repo の worktree へ移動（なければ作成）
+EOF
+      ;;
+    *)
+      _repo_cd "$@"
+      ;;
+  esac
+}
+
