@@ -4,6 +4,8 @@
 
   home.packages = with pkgs; [
     git
+    ghq
+    git-wt
     chezmoi
     ripgrep
     fd
