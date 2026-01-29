@@ -194,14 +194,32 @@ _repo_wt() {
 
     command -v ghq >/dev/null 2>&1 || { echo "repo wt: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
 
+    # ghq list を zoxide のスコア順にソート
+    _repo_sorted_list_local() {
+      awk '
+        NR == FNR { ghq[$0] = 1; next }
+        $0 in ghq { print; delete ghq[$0] }
+        END { for (p in ghq) print p }
+      ' <(ghq list -p 2>/dev/null) <(zoxide query -l 2>/dev/null)
+    }
+
     r="$(
-      ghq list -p 2>/dev/null | \
+      _repo_sorted_list_local | \
+        awk -v me="$REPO_MY_OWNER" -F'/' '
+          $0 ~ /\/github\.com\// {
+            repo=$(NF); owner=$(NF-1);
+            owner_disp = (owner==me ? "" : "@" owner);
+            print repo "\t" owner_disp "\t" $0
+          }
+        ' | \
         fzf --height 50% --reverse \
             --prompt 'repo(wt)> ' \
             --query "$query" \
-            --preview 'git -C {} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {} status -sb || ls -la {} | head -n 80'
+            --delimiter $'\t' \
+            --with-nth=1,2 \
+            --preview 'git -C {3} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {3} status -sb || ls -la {3} | head -n 80'
     )" || return 1
-    echo "$r"
+    echo "${r##*$'\t'}"
   }
 
   # `git wt` の一覧を fzf 用 TSV(branch \t path) にする
