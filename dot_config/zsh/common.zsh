@@ -1,3 +1,5 @@
+export PATH="$HOME/.local/bin:$PATH"
+
 # 普段用: y
 function y() {
   local tmp="$(mktemp -t yazi-cwd.XXXXXX)"
@@ -24,7 +26,6 @@ alias cc="claude --dangerously-skip-permissions"
 export EDITOR="nvim"
 export AI_COMMIT_N=3
 export OPENROUTER_API_KEY_FILE="$HOME/.config/secrets/openrouter_api_key"
-export PATH="$HOME/.local/bin:$PATH"
 
 eval "$(fzf --zsh)"
 eval "$(sheldon source)"
@@ -79,24 +80,38 @@ unset -f repo 2>/dev/null
 unset -f _repo_cd _repo_get _repo_wt 2>/dev/null
 
 # ローカル ghq repo へ移動（zoxide 前提）
+# 自分の GitHub owner（必要ならここだけ変える）
+: "${REPO_MY_OWNER:=g960059}"
+
 _repo_cd() {
   local query="${1:-}"
-  local target
+  local picked repo_path
 
   command -v ghq >/dev/null 2>&1 || { echo "repo: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "repo: fzf が見つかりません（PATH=$PATH）" >&2; return 1; }
   command -v z   >/dev/null 2>&1 || { echo "repo: zoxide(z) が見つかりません（PATH=$PATH）" >&2; return 1; }
 
-  target="$(
+  picked="$(
     ghq list -p 2>/dev/null | \
+      awk -v me="$REPO_MY_OWNER" -F'/' '
+        $0 ~ /\/github\.com\// {
+          repo=$(NF); owner=$(NF-1);
+          owner_disp = (owner==me ? "" : "@" owner);
+          print repo "\t" owner_disp "\t" $0
+        }
+      ' | \
       fzf --height 50% --reverse \
           --prompt 'repo> ' \
           --query "$query" \
-          --preview 'git -C {} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {} status -sb || ls -la {} | head -n 80'
+          --delimiter $'\t' \
+          --with-nth=1,2 \
+          --preview 'git -C {3} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {3} status -sb || ls -la {3} | head -n 80'
   )" || return 1
 
-  z "$target"
+  repo_path="${picked##*$'\t'}"
+  z "$repo_path"
 }
+
 
 # GitHub repo を選んで ghq get（owner/repo 形式）
 _repo_get() {
@@ -255,8 +270,8 @@ EOF
           --preview 'cd {3} && pwd && echo && git status -sb && echo && git log -n 20 --oneline --decorate --color=always'
     )" || return 1
 
-    local path="${picked##*$'\t'}"
-    z "$path"
+    local wt_path="${picked##*$'\t'}"
+    z "$wt_path"
     return 0
   fi
 

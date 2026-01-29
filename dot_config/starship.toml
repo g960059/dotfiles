@@ -3,7 +3,7 @@
 add_newline = false
 
 format = """
-${custom.vm_ctx}$directory$git_branch$git_status
+${custom.vm_ctx}${custom.git_repo}$directory$git_branch$git_status
 $character
 """
 
@@ -17,6 +17,37 @@ style = "fg:#6c7086"
 format = "[$output]($style) "
 
 # -------------------------
+# Git repo/worktree ctx
+#   - 通常: repo
+#   - git-wt (.worktrees/<name>) 配下: repo@<worktree>
+# -------------------------
+[custom.git_repo]
+when = "git rev-parse --is-inside-work-tree >/dev/null 2>&1"
+command = '''
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+repo_root=$top
+wt=""
+
+case "$top" in
+  */.worktrees/*)
+    wt=${top#*/.worktrees/}
+    wt=${wt%%/*}
+    repo_root=${top%/.worktrees/*}
+    ;;
+esac
+
+repo=${repo_root##*/}
+
+if [ -n "$wt" ]; then
+  printf "%s@%s" "$repo" "$wt"
+else
+  printf "%s" "$repo"
+fi
+'''
+style = "bold fg:#89b4fa"
+format = "[$output]($style) "
+# -------------------------
 # Directory (Pure寄り)
 #   - repo配下では repo からの相対パスにする（末尾表示）
 #   - repo外では通常のパス
@@ -24,11 +55,18 @@ format = "[$output]($style) "
 [directory]
 truncation_length = 6
 home_symbol = "~"
-truncate_to_repo = true 
+truncate_to_repo = true
 read_only = " 󰌾"
 style = "bold fg:#89b4fa"
 read_only_style = "fg:#f38ba8"
+
+# repo 外のとき（従来どおり）
 format = "[$path]($style)[$read_only]($read_only_style) "
+
+# repo 内のとき：repo ルート名($repo_root)を出さず、repo内パス($path)だけにする
+before_repo_root_style = "bold fg:#89b4fa"
+repo_root_style = "bold fg:#89b4fa"
+repo_root_format = "[$path]($style)[$read_only]($read_only_style) "
 
 # -------------------------
 # Git (薄いグレー / Pure寄り)
