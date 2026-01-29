@@ -91,8 +91,18 @@ _repo_cd() {
   command -v fzf >/dev/null 2>&1 || { echo "repo: fzf が見つかりません（PATH=$PATH）" >&2; return 1; }
   command -v z   >/dev/null 2>&1 || { echo "repo: zoxide(z) が見つかりません（PATH=$PATH）" >&2; return 1; }
 
+  # ghq list を zoxide のスコア順（直近使用順）にソート
+  # zoxide query -l はスコア降順でパスを返す
+  _repo_sorted_list() {
+    awk '
+      NR == FNR { ghq[$0] = 1; next }
+      $0 in ghq { print; delete ghq[$0] }
+      END { for (p in ghq) print p }
+    ' <(ghq list -p 2>/dev/null) <(zoxide query -l 2>/dev/null)
+  }
+
   picked="$(
-    ghq list -p 2>/dev/null | \
+    _repo_sorted_list | \
       awk -v me="$REPO_MY_OWNER" -F'/' '
         $0 ~ /\/github\.com\// {
           repo=$(NF); owner=$(NF-1);
