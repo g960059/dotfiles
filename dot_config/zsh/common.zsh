@@ -71,16 +71,21 @@ hms() {
 }
 
 # --- repo: ghq + fzf + zoxide + git-wt ---
-# prerequisites: ghq, fzf, zoxide (z), gh (optional for repo get), git-wt (optional for repo wt)
+# prerequisites: ghq, fzf, zoxide (z), gh (optional for repo get), git-wt (required for repo wt)
 
 # 既存の alias / function を消してから定義（安全策）
 unalias repo 2>/dev/null
 unset -f repo 2>/dev/null
+unset -f _repo_cd _repo_get _repo_wt 2>/dev/null
 
 # ローカル ghq repo へ移動（zoxide 前提）
 _repo_cd() {
   local query="${1:-}"
   local target
+
+  command -v ghq >/dev/null 2>&1 || { echo "repo: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v fzf >/dev/null 2>&1 || { echo "repo: fzf が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v z   >/dev/null 2>&1 || { echo "repo: zoxide(z) が見つかりません（PATH=$PATH）" >&2; return 1; }
 
   target="$(
     ghq list -p 2>/dev/null | \
@@ -94,18 +99,17 @@ _repo_cd() {
 }
 
 # GitHub repo を選んで ghq get（owner/repo 形式）
-_repo_get () {
+_repo_get() {
   local query="${1:-}"
-  local pick name subpath repo_path ghbin ghqbin
+  local pick name subpath repo_path
 
-  ghbin="$(whence -p gh 2>/dev/null)"  || true
-  ghqbin="$(whence -p ghq 2>/dev/null)" || true
-
-  [[ -n "$ghbin"  ]] || { echo "repo get: gh が見つかりません（PATH=$PATH）" >&2; return 1; }
-  [[ -n "$ghqbin" ]] || { echo "repo get: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v gh  >/dev/null 2>&1 || { echo "repo get: gh が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v ghq >/dev/null 2>&1 || { echo "repo get: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v fzf >/dev/null 2>&1 || { echo "repo get: fzf が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v z   >/dev/null 2>&1 || { echo "repo get: zoxide(z) が見つかりません（PATH=$PATH）" >&2; return 1; }
 
   pick="$(
-    "$ghbin" repo list --limit 200 \
+    gh repo list --limit 200 \
       --json nameWithOwner,description,updatedAt \
       --jq '.[] | "\(.nameWithOwner)\t\(.updatedAt)\t\(.description // "")"' | \
     fzf --height 50% --reverse \
@@ -115,45 +119,202 @@ _repo_get () {
         --preview 'echo {1}; echo; echo {3}; echo; echo "updated: {2}"'
   )" || return 1
 
-  name="${pick%%$'\t'*}"          # owner/repo
-  "$ghqbin" get "$name" || return 1
+  name="${pick%%$'\t'*}"     # owner/repo
+  ghq get "$name" || return 1
 
   subpath="github.com/$name"
-  repo_path="$("$ghqbin" list -p -e "$subpath" 2>/dev/null | head -n 1)"
-  [[ -n "$repo_path" ]] || repo_path="$("$ghqbin" root)/$subpath"
+  repo_path="$(ghq list -p -e "$subpath" 2>/dev/null | head -n 1)"
+  [[ -n "$repo_path" ]] || repo_path="$(ghq root)/$subpath"
 
   z "$repo_path"
 }
 
-# 現 repo で worktree へ移動（なければ作成）
+# repo wt: git-wt の薄いラッパー（1 branch = 1 worktree 前提）
 _repo_wt() {
-  local branch="${1:-}"
-  local root wt_path
+  emulate -L zsh
+  setopt pipefail no_aliases
 
-  root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "repo wt: git repo の中で実行してください（先に `repo` で移動）" >&2
+  command -v git-wt >/dev/null 2>&1 || {
+    echo "repo wt: git-wt が見つかりません（PATH=$PATH）" >&2
     return 1
   }
+  command -v fzf >/dev/null 2>&1 || { echo "repo wt: fzf が見つかりません（PATH=$PATH）" >&2; return 1; }
+  command -v z   >/dev/null 2>&1 || { echo "repo wt: zoxide(z) が見つかりません（PATH=$PATH）" >&2; return 1; }
 
-  git wt --help >/dev/null 2>&1 || {
-    echo "repo wt: git-wt が必要です（`git wt` が動く状態にしてください）" >&2
-    return 1
+  local all=0 force=0
+  local sub="" arg="" query=""
+  local root=""
+
+  # --- option/verb parse（薄く） ---
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -a|--all) all=1; shift ;;
+      -D|--force) force=1; shift ;;
+      new|create|-n|-c) sub="new"; shift; break ;;   # ★createもnew扱い
+      rm|remove|delete|-d) sub="rm"; shift; break ;;
+      rmb|remove-branch) sub="rmb"; shift; break ;;
+      -h|--help|help) sub="help"; shift; break ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+
+  arg="${1:-}"
+  query="$arg"
+
+  # repo root を決める（repo外なら ghq で選択 → その repo の worktree）
+  _pick_repo_root() {
+    local r
+    r="$(git rev-parse --show-toplevel 2>/dev/null)" && { echo "$r"; return 0; }
+
+    command -v ghq >/dev/null 2>&1 || { echo "repo wt: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+
+    r="$(
+      ghq list -p 2>/dev/null | \
+        fzf --height 50% --reverse \
+            --prompt 'repo(wt)> ' \
+            --query "$query" \
+            --preview 'git -C {} rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C {} status -sb || ls -la {} | head -n 80'
+    )" || return 1
+    echo "$r"
   }
 
-  if [[ -z "$branch" ]]; then
-    branch="$(
-      git -C "$root" branch --format='%(refname:short)' | \
+  # `git wt` の一覧を fzf 用 TSV(branch \t path) にする
+  _wt_list_tsv() {
+    local r="$1"
+    git -C "$r" wt 2>/dev/null | \
+      awk '
+        # header を除外（git-wt の表形式出力を想定）
+        $1=="PATH" || $2=="PATH" { next }
+        # marker あり "* path branch head"
+        $1=="*" { print $3 "\t" $2; next }
+        # marker なし  "path branch head"
+        $1 ~ "^/" { print $2 "\t" $1; next }
+      '
+  }
+
+  # worktree選択して path を返す
+  _wt_pick_path() {
+    local r="$1"
+    local picked
+    picked="$(
+      _wt_list_tsv "$r" | \
         fzf --height 50% --reverse \
             --prompt 'wt> ' \
-            --preview "git -C '$root' log -n 20 --oneline --decorate --color=always {}"
+            --delimiter $'\t' --with-nth=1 \
+            --query "$query" \
+            --preview 'cd {2} && pwd && echo && git status -sb && echo && git log -n 20 --oneline --decorate --color=always'
     )" || return 1
+    echo "${picked#*$'\t'}"
+  }
+
+  # branch名 or path から worktree path を解決
+  _wt_resolve_path() {
+    local r="$1" x="$2"
+    if [[ -z "$x" ]]; then
+      _wt_pick_path "$r"
+      return $?
+    fi
+    if [[ -d "$x" ]]; then
+      echo "$x"; return 0
+    fi
+    local line
+    line="$(_wt_list_tsv "$r" | awk -F'\t' -v b="$x" '$1==b {print $0; exit}')"
+    [[ -n "$line" ]] && { echo "${line#*$'\t'}"; return 0; }
+    return 1
+  }
+
+  if [[ "$sub" == "help" ]]; then
+    cat <<'EOF'
+repo wt                         : worktree 一覧から選んで移動（repo外ならrepo選択→worktree選択）
+repo wt <query>                 : query を初期絞り込みにして同上（完全一致branchがあれば直行）
+repo wt -a [query]              : ghq配下の全repo×全worktree横断で検索→移動（重い）
+repo wt new|create <branch>     : git wt --nocd <branch> で作成/取得→移動
+repo wt rm <branch|path>        : worktree を削除（branchは残す）
+repo wt rmb <branch|path>       : worktree 削除 + branch 削除（-D なら強制）
+repo wt -D rm|rmb <...>         : 強制（worktree remove --force / branch -D）
+EOF
+    return 0
   fi
 
-  wt_path="$(git -C "$root" wt --nocd "$branch")" || return 1
-  z "$wt_path"
+  # --- 全repo横断(-a) ---
+  if (( all )); then
+    command -v ghq >/dev/null 2>&1 || { echo "repo wt -a: ghq が見つかりません（PATH=$PATH）" >&2; return 1; }
+
+    local picked
+    picked="$(
+      ghq list -p 2>/dev/null | \
+        while IFS= read -r r; do
+          [[ -d "$r/.git" ]] || continue
+          _wt_list_tsv "$r" | awk -F'\t' -v repo="$r" '{print repo "\t" $1 "\t" $2}'
+        done | \
+      fzf --height 60% --reverse \
+          --prompt 'wt(all)> ' \
+          --with-nth=1,2 --delimiter $'\t' \
+          --query "$query" \
+          --preview 'cd {3} && pwd && echo && git status -sb && echo && git log -n 20 --oneline --decorate --color=always'
+    )" || return 1
+
+    local path="${picked##*$'\t'}"
+    z "$path"
+    return 0
+  fi
+
+  # --- repo単位 ---
+  root="$(_pick_repo_root)" || return 1
+
+  # --- 作成（new/create） ---
+  if [[ "$sub" == "new" ]]; then
+    [[ -n "$arg" ]] || { echo "repo wt new/create: branch 名を指定してください" >&2; return 1; }
+    local p
+    p="$(git -C "$root" wt --nocd "$arg")" || return 1
+    z "$p"
+    return 0
+  fi
+
+  # --- 削除（rm / rmb） ---
+  if [[ "$sub" == "rm" || "$sub" == "rmb" ]]; then
+    local p b
+    p="$(_wt_resolve_path "$root" "$arg")" || {
+      echo "repo wt $sub: 対象が見つかりません（branch or path）" >&2
+      return 1
+    }
+    b="$(_wt_list_tsv "$root" | awk -F'\t' -v p="$p" '$2==p {print $1; exit}')"
+
+    if (( force )); then
+      git -C "$root" worktree remove --force "$p" || return 1
+    else
+      git -C "$root" worktree remove "$p" || return 1
+    fi
+
+    if [[ "$sub" == "rmb" && -n "$b" ]]; then
+      if (( force )); then
+        git -C "$root" branch -D "$b"
+      else
+        git -C "$root" branch -d "$b"
+      fi
+    fi
+    return 0
+  fi
+
+  # --- ナビ（repo wt / repo wt <query>） ---
+  # 1) branch 完全一致があれば直行（速い）
+  if [[ -n "$arg" ]]; then
+    local exact_path
+    exact_path="$(_wt_list_tsv "$root" | awk -F'\t' -v b="$arg" '$1==b {print $2; exit}')"
+    if [[ -n "$exact_path" ]]; then
+      z "$exact_path"
+      return 0
+    fi
+  fi
+
+  # 2) 一覧（query 初期化）→選択移動
+  local picked_path
+  picked_path="$(_wt_pick_path "$root")" || return 1
+  z "$picked_path"
 }
 
-
+# repo コマンド本体
 repo() {
   local sub="${1:-}"
   case "$sub" in
@@ -165,10 +326,11 @@ repo() {
       ;;
     -h|--help|help)
       cat <<'EOF'
-repo              : ghq のローカル repo へ移動（fzf + zoxide）
-repo <query>      : クエリ付きで repo 選択
-repo get [query]  : GitHub repo を選んで ghq get（owner/repo）
-repo wt [branch]  : 現 repo の worktree へ移動（なければ作成）
+repo                 : ghq のローカル repo へ移動（fzf + zoxide）
+repo <query>         : クエリ付きで repo 選択
+repo get [query]     : GitHub repo を選んで ghq get（owner/repo）
+repo wt [...]        : git-wt の薄いラッパー（repo外でもOK / -a横断あり）
+  - 詳細: repo wt --help
 EOF
       ;;
     *)
